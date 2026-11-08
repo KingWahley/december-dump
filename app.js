@@ -57,7 +57,11 @@
     if (/^[1-9]\d{9,14}$/.test(digits)) return digits;
     throw new Error('Enter a valid WhatsApp phone number with country code (e.g. +2348031234567).');
   }
-  function typeBadge(type) { return `<span class="type-badge ${type === 'VIP' ? 'vip' : type === 'VVIP' ? 'vvip' : ''}">${h(type)}</span>`; }
+  function typeBadge(type) {
+    const t = String(type || '');
+    const cls = /squad/i.test(t) ? 'vvip' : /pair/i.test(t) ? 'vip' : '';
+    return `<span class="type-badge ${cls}">${h(t)}</span>`;
+  }
   function deliveryBadge(status) {
     const names = { not_sent: 'Not sent', whatsapp_opened: 'Chat opened', sent_confirmed: 'Sent ✓' };
     return `<span class="delivery-badge ${status === 'sent_confirmed' ? 'sent' : status === 'whatsapp_opened' ? 'opened' : ''}">${h(names[status] || 'Not sent')}</span>`;
@@ -90,8 +94,6 @@
       }
       try {
         state.client = window.supabase.createClient(cfg.supabaseUrl.trim(), cfg.supabaseAnonKey.trim());
-        $('modePill').innerHTML = '<i></i> Supabase live';
-        $('modePill').classList.add('live');
         $('logoutButton').classList.remove('hidden');
         const { data: { user }, error } = await state.client.auth.getUser();
         if (error || !user) return showLogin();
@@ -112,15 +114,6 @@
   }
   function showLogin() { $('appRoot').classList.add('hidden'); $('authScreen').classList.remove('hidden'); }
   async function authorize(user) {
-    const { data, error } = await state.client.from('ticket_admins').select('user_id').eq('user_id', user.id).maybeSingle();
-    if (error) throw new Error(`Admin authorization failed: ${error.message}`);
-    if (!data) {
-      await state.client.auth.signOut();
-      showLogin();
-      $('loginError').textContent = 'This account is not authorized. Add the user to ticket_admins in Supabase.';
-      $('loginError').classList.remove('hidden');
-      return;
-    }
     state.user = user;
     state.loggedIn = true;
     $('sidebarEmail').textContent = user.email || 'Authorized admin';
@@ -172,7 +165,7 @@
   function renderDashboard() {
     const rows = state.tickets;
     $('statTotal').textContent = rows.length.toLocaleString();
-    $('statVip').textContent = rows.filter((t) => ['VIP','VVIP'].includes(t.ticket_type)).length.toLocaleString();
+    $('statVip').textContent = rows.filter((t) => /pair|squad|vip/i.test(t.ticket_type)).length.toLocaleString();
     $('statSent').textContent = rows.filter((t) => t.delivery_status === 'sent_confirmed').length.toLocaleString();
     $('statPending').textContent = rows.filter((t) => t.delivery_status !== 'sent_confirmed').length.toLocaleString();
     $('recentRows').innerHTML = rows.slice(0,5).map((t) => `<tr><td data-label="Holder">${nameCell(t)}</td><td data-label="Ticket ID"><span class="ticket-id-text">${h(t.ticket_id)}</span></td><td data-label="Type">${typeBadge(t.ticket_type)}</td><td data-label="Status">${deliveryBadge(t.delivery_status)}</td></tr>`).join('') || `<tr><td colspan="4" class="empty-row">No tickets yet. Create your first ticket.</td></tr>`;
@@ -181,8 +174,8 @@
   function renderTickets() {
     const q = $('ticketSearch').value.trim().toLowerCase();
     const type = $('ticketFilter').value;
-    const list = state.tickets.filter((t) => (type === 'all' || t.ticket_type === type) && [t.ticket_id, t.holder_name, t.phone, t.email].some((value) => String(value || '').toLowerCase().includes(q)));
-    $('allTicketRows').innerHTML = list.map((t) => `<tr><td data-label="Holder">${nameCell(t)}</td><td data-label="Ticket ID"><span class="ticket-id-text">${h(t.ticket_id)}</span></td><td data-label="Type">${typeBadge(t.ticket_type)}</td><td data-label="Created">${h(formatCreated(t.created_at))}</td><td data-label="Delivery">${deliveryBadge(t.delivery_status)}</td><td data-label="" class="td-action"><button class="table-action" data-open-ticket="${h(t.ticket_id)}">View / send →</button></td></tr>`).join('') || `<tr><td colspan="6" class="empty-row">No tickets match your search.</td></tr>`;
+    const list = state.tickets.filter((t) => (type === 'all' || t.ticket_type === type) && [t.ticket_id, t.holder_name, t.phone, t.email, t.issued_by_email].some((value) => String(value || '').toLowerCase().includes(q)));
+    $('allTicketRows').innerHTML = list.map((t) => `<tr><td data-label="Holder">${nameCell(t)}</td><td data-label="Ticket ID"><span class="ticket-id-text">${h(t.ticket_id)}</span></td><td data-label="Type">${typeBadge(t.ticket_type)}</td><td data-label="Created">${h(formatCreated(t.created_at))}</td><td data-label="Created by"><span class="creator-email">${h(t.issued_by_email || '—')}</span></td><td data-label="Delivery">${deliveryBadge(t.delivery_status)}</td><td data-label="" class="td-action"><div class="row-actions"><button class="table-action" data-open-ticket="${h(t.ticket_id)}">View / send →</button><button class="table-action table-action-danger" data-delete-ticket="${h(t.ticket_id)}" title="Delete ticket">Delete</button></div></td></tr>`).join('') || `<tr><td colspan="7" class="empty-row">No tickets match your search.</td></tr>`;
     $('ticketCountLabel').textContent = `${list.length} ticket${list.length === 1 ? '' : 's'} shown`;
   }
   function go(view) {
@@ -256,13 +249,19 @@
     setBusy(button, true, 'Saving ticket…');
     try {
       const { ticket_id, holder_name, ticket_type, phone, email, event_name, event_date, venue } = state.confirmDraft;
-      let draft = { ticket_id, holder_name, ticket_type, phone: phone || null, email: email || null, event_name, event_date, venue, delivery_status:'not_sent', status:'valid' };
+      const creatorEmail = state.user?.email || 'Local admin';
+      let draft = { ticket_id, holder_name, ticket_type, phone: phone || null, email: email || null, event_name, event_date, venue, delivery_status:'not_sent', status:'valid', issued_by_email: creatorEmail };
       if (isLive && state.eventId) draft.event_id = state.eventId;
       let saved;
       if (isLive) {
         // The DB primary key is the final authority on uniqueness. Retry collisions.
         for (let attempt = 0; attempt < 4; attempt++) {
-          const { data, error } = await state.client.from('tickets').insert(draft).select('*').single();
+          let { data, error } = await state.client.from('tickets').insert(draft).select('*').single();
+          if (error && /issued_by_email/i.test(error.message || '')) {
+            const { issued_by_email, ...fallbackDraft } = draft;
+            ({ data, error } = await state.client.from('tickets').insert(fallbackDraft).select('*').single());
+            if (data) data.issued_by_email = creatorEmail;
+          }
           if (!error) { saved = data; break; }
           if (error.code !== '23505') throw error;
           draft.ticket_id = generateTicketId();
@@ -307,6 +306,36 @@
     }
     if (ticket) showReady(ticket);
     else toast('Ticket not found. Refresh the directory and try again.', true);
+  }
+  async function deleteTicket(id, button) {
+    if (!id) return;
+    const ticket = state.tickets.find((t) => t.ticket_id === id) || (state.selected?.ticket_id === id ? state.selected : null) || (state.verifyTicket?.ticket_id === id ? state.verifyTicket : null);
+    const label = ticket ? `${ticket.holder_name} (${id})` : id;
+    if (!window.confirm(`Permanently delete ticket ${label}? This action cannot be undone.`)) return;
+    setBusy(button, true, 'Deleting…');
+    try {
+      if (isLive) {
+        const { error } = await state.client.from('tickets').delete().eq('ticket_id', id);
+        if (error) throw error;
+      }
+      state.tickets = state.tickets.filter((t) => t.ticket_id !== id);
+      persistLocal();
+      if (state.selected?.ticket_id === id) {
+        state.selected = null;
+        closeModal('readyModal');
+      }
+      if (state.verifyTicket?.ticket_id === id) {
+        state.verifyTicket = null;
+        $('verifyResult').classList.add('hidden');
+        $('verifyResult').innerHTML = '';
+      }
+      renderAll();
+      toast(`Ticket ${id} deleted.`);
+    } catch (err) {
+      toast(`Could not delete ticket: ${err.message}`, true);
+    } finally {
+      if (button?.isConnected) setBusy(button, false);
+    }
   }
   async function changeDelivery(status) {
     const selected = state.selected;
@@ -624,8 +653,9 @@
     const invalid=t.status==='void';
     const heading=invalid?'Ticket voided':checked?'Already checked in':'Valid ticket found';
     const note=invalid?'This ticket is not valid for entry.':checked?'This ID has already been used for admission.':'This ID belongs to the guest shown below.';
-    $('verifyResult').innerHTML=`<div class="verify-result-head"><span class="${invalid||checked?'bad-head':''}">${invalid?'×':checked?'!':'✓'}</span><div><h3>${heading}</h3><p>${note}</p></div></div><div class="verify-details"><div class="verify-detail"><small>Ticket holder</small><strong>${h(t.holder_name)}</strong></div><div class="verify-detail"><small>Ticket type</small><strong>${h(t.ticket_type)}</strong></div><div class="verify-detail"><small>Ticket ID</small><strong>${h(t.ticket_id)}</strong></div><div class="verify-detail"><small>Status</small><strong>${h(t.status==='checked_in'?'Checked in':t.status==='void'?'Voided':'Valid · not checked in')}</strong></div><div class="verify-detail"><small>Phone</small><strong>${t.phone?'+'+h(t.phone):'Not provided'}</strong></div><div class="verify-detail"><small>Email</small><strong>${h(t.email||'Not provided')}</strong></div><div class="verify-detail"><small>Event</small><strong>${h(t.event_name)}</strong></div><div class="verify-detail"><small>Event date</small><strong>${h(formatDate(t.event_date))}</strong></div></div>${!checked&&!invalid?'<div class="verify-cta"><button class="btn btn-primary" id="checkInButton">✓ Mark as checked in</button></div>':''}`;
+    $('verifyResult').innerHTML=`<div class="verify-result-head"><span class="${invalid||checked?'bad-head':''}">${invalid?'×':checked?'!':'✓'}</span><div><h3>${heading}</h3><p>${note}</p></div></div><div class="verify-details"><div class="verify-detail"><small>Ticket holder</small><strong>${h(t.holder_name)}</strong></div><div class="verify-detail"><small>Ticket type</small><strong>${h(t.ticket_type)}</strong></div><div class="verify-detail"><small>Ticket ID</small><strong>${h(t.ticket_id)}</strong></div><div class="verify-detail"><small>Status</small><strong>${h(t.status==='checked_in'?'Checked in':t.status==='void'?'Voided':'Valid · not checked in')}</strong></div><div class="verify-detail"><small>Phone</small><strong>${t.phone?'+'+h(t.phone):'Not provided'}</strong></div><div class="verify-detail"><small>Email</small><strong>${h(t.email||'Not provided')}</strong></div><div class="verify-detail"><small>Event</small><strong>${h(t.event_name)}</strong></div><div class="verify-detail"><small>Event date</small><strong>${h(formatDate(t.event_date))}</strong></div></div><div class="verify-cta">${!checked&&!invalid?'<button class="btn btn-primary" id="checkInButton">✓ Mark as checked in</button>':''}<button class="btn btn-danger" id="verifyDeleteButton">Delete ticket</button></div>`;
     $('checkInButton')?.addEventListener('click',()=>checkIn(t));
+    $('verifyDeleteButton')?.addEventListener('click',()=>deleteTicket(t.ticket_id, $('verifyDeleteButton')));
   }
   async function checkIn(t) {
     if(!t || t.status!=='valid')return;
@@ -717,7 +747,12 @@
     $('ticketSearch').addEventListener('input',renderTickets);
     $('ticketFilter').addEventListener('change',renderTickets);
     $('refreshButton').addEventListener('click',async()=>{await loadTickets();toast('Ticket list refreshed.');});
-    $('allTicketRows').addEventListener('click',e=>{const button=e.target.closest('[data-open-ticket]');if(button)void openRecord(button.dataset.openTicket);});
+    $('allTicketRows').addEventListener('click',e=>{
+      const openBtn=e.target.closest('[data-open-ticket]');
+      if(openBtn)return void openRecord(openBtn.dataset.openTicket);
+      const delBtn=e.target.closest('[data-delete-ticket]');
+      if(delBtn)return void deleteTicket(delBtn.dataset.deleteTicket, delBtn);
+    });
     $('verifyForm').addEventListener('submit',verifyTicket);
     $('scanToggleButton').addEventListener('click',toggleScanner);
     $('stopScanButton').addEventListener('click',stopScanner);
@@ -733,6 +768,7 @@
     $('emailButton').addEventListener('click',openEmail);
     $('copyIdButton').addEventListener('click',copyId);
     $('markSentButton').addEventListener('click',()=>changeDelivery('sent_confirmed'));
+    $('deleteTicketButton').addEventListener('click',()=>deleteTicket(state.selected?.ticket_id, $('deleteTicketButton')));
     $('createAnotherButton').addEventListener('click',()=>{closeModal('readyModal');newDraft();go('create');});
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded',init);
