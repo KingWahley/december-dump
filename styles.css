@@ -156,3 +156,32 @@
 }
 
 .qr-fallback{font-size:11px;line-height:1.4;letter-spacing:1.1px;color:#7d8fa4;font-weight:800;text-align:center;border:1px dashed #d5deeb;padding:12px 7px;border-radius:5px}
+.lucide{width:16px;height:16px;stroke-width:2.1;vertical-align:middle;flex:none;display:inline-block}
+.nav-icon{display:inline-grid;place-items:center}
+.nav-icon .lucide{width:18px;height:18px}
+.sidebar-logout .lucide,.mobile-menu .lucide,.modal-close .lucide{width:20px;height:20px}
+.heading-accent .lucide{width:20px;height:20px;vertical-align:-2px}
+.stat-icon .lucide{width:18px;height:18px}
+.text-button{display:inline-flex;align-items:center;gap:5px}
+.text-button .lucide{width:14px;height:14px}
+.quick-icon .lucide{width:19px;height:19px}
+.quick-chevron .lucide{width:16px;height:16px}
+.quick-note span{display:inline-flex;margin-top:2px}
+.quick-note .lucide,.hint-box .lucide{width:16px;height:16px}
+.form-heading-icon .lucide,.settings-icon .lucide{width:20px;height:20px}
+.input-with-icon>span{top:50%;transform:translateY(-50%);display:inline-grid;place-items:center}
+.input-with-icon .lucide,.search-field .lucide{width:16px;height:16px}
+.search-field>span{top:50%;transform:translateY(-50%);display:inline-grid;place-items:center}
+.pass-admission .lucide{width:12px;height:12px}
+.delivery-badge .lucide{width:12px;height:12px;stroke-width:2.6}
+.table-action{display:inline-flex;align-items:center;justify-content:center;gap:5px}
+.table-action .lucide{width:13px;height:13px}
+.verify-illustration .lucide{width:26px;height:26px}
+.verify-result-head>span .lucide{width:20px;height:20px}
+.confirm-check span{display:inline-grid;place-items:center}
+.confirm-check .lucide{width:16px;height:16px}
+.success-inline .lucide{width:14px;height:14px;stroke-width:2.6}
+@media(max-width:690px){
+  .tickets-table td.td-action .table-action{display:inline-flex}
+  .input-with-icon>span,.search-field>span{top:50%}
+}

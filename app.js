@@ -63,8 +63,14 @@
     return `<span class="type-badge ${cls}">${h(t)}</span>`;
   }
   function deliveryBadge(status) {
-    const names = { not_sent: 'Not sent', whatsapp_opened: 'Chat opened', sent_confirmed: 'Sent ✓' };
-    return `<span class="delivery-badge ${status === 'sent_confirmed' ? 'sent' : status === 'whatsapp_opened' ? 'opened' : ''}">${h(names[status] || 'Not sent')}</span>`;
+    const names = { not_sent: 'Not sent', whatsapp_opened: 'Chat opened', sent_confirmed: 'Sent' };
+    const icon = status === 'sent_confirmed' ? '<i data-lucide="check"></i>' : '';
+    return `<span class="delivery-badge ${status === 'sent_confirmed' ? 'sent' : status === 'whatsapp_opened' ? 'opened' : ''}">${icon}${h(names[status] || 'Not sent')}</span>`;
+  }
+  function refreshIcons(root = document) {
+    if (window.lucide?.createIcons) {
+      try { window.lucide.createIcons({ root }); } catch { window.lucide.createIcons(); }
+    }
   }
   function toast(message, isError = false) {
     const box = $('toast');
@@ -78,10 +84,11 @@
   function setBusy(button, busy, waitingLabel) {
     if (!button) return;
     if (busy) { button.dataset.original = button.innerHTML; button.disabled = true; button.textContent = waitingLabel || 'Working…'; }
-    else { button.disabled = false; if (button.dataset.original) button.innerHTML = button.dataset.original; }
+    else { button.disabled = false; if (button.dataset.original) { button.innerHTML = button.dataset.original; refreshIcons(button); } }
   }
 
   async function init() {
+    refreshIcons();
     bindEvents();
     fillSettingsForm();
     newDraft();
@@ -169,14 +176,16 @@
     $('statSent').textContent = rows.filter((t) => t.delivery_status === 'sent_confirmed').length.toLocaleString();
     $('statPending').textContent = rows.filter((t) => t.delivery_status !== 'sent_confirmed').length.toLocaleString();
     $('recentRows').innerHTML = rows.slice(0,5).map((t) => `<tr><td data-label="Holder">${nameCell(t)}</td><td data-label="Ticket ID"><span class="ticket-id-text">${h(t.ticket_id)}</span></td><td data-label="Type">${typeBadge(t.ticket_type)}</td><td data-label="Status">${deliveryBadge(t.delivery_status)}</td></tr>`).join('') || `<tr><td colspan="4" class="empty-row">No tickets yet. Create your first ticket.</td></tr>`;
+    refreshIcons($('recentRows'));
   }
   function nameCell(t) { return `<span class="table-name"><span class="table-avatar">${h(initials(t.holder_name))}</span><span>${h(t.holder_name)}</span></span>`; }
   function renderTickets() {
     const q = $('ticketSearch').value.trim().toLowerCase();
     const type = $('ticketFilter').value;
     const list = state.tickets.filter((t) => (type === 'all' || t.ticket_type === type) && [t.ticket_id, t.holder_name, t.phone, t.email, t.issued_by_email].some((value) => String(value || '').toLowerCase().includes(q)));
-    $('allTicketRows').innerHTML = list.map((t) => `<tr><td data-label="Holder">${nameCell(t)}</td><td data-label="Ticket ID"><span class="ticket-id-text">${h(t.ticket_id)}</span></td><td data-label="Type">${typeBadge(t.ticket_type)}</td><td data-label="Created">${h(formatCreated(t.created_at))}</td><td data-label="Created by"><span class="creator-email">${h(t.issued_by_email || '—')}</span></td><td data-label="Delivery">${deliveryBadge(t.delivery_status)}</td><td data-label="" class="td-action"><div class="row-actions"><button class="table-action" data-open-ticket="${h(t.ticket_id)}">View / send →</button><button class="table-action table-action-danger" data-delete-ticket="${h(t.ticket_id)}" title="Delete ticket">Delete</button></div></td></tr>`).join('') || `<tr><td colspan="7" class="empty-row">No tickets match your search.</td></tr>`;
+    $('allTicketRows').innerHTML = list.map((t) => `<tr><td data-label="Holder">${nameCell(t)}</td><td data-label="Ticket ID"><span class="ticket-id-text">${h(t.ticket_id)}</span></td><td data-label="Type">${typeBadge(t.ticket_type)}</td><td data-label="Created">${h(formatCreated(t.created_at))}</td><td data-label="Created by"><span class="creator-email">${h(t.issued_by_email || '—')}</span></td><td data-label="Delivery">${deliveryBadge(t.delivery_status)}</td><td data-label="" class="td-action"><div class="row-actions"><button class="table-action" data-open-ticket="${h(t.ticket_id)}">View / send <i data-lucide="arrow-right"></i></button><button class="table-action table-action-danger" data-delete-ticket="${h(t.ticket_id)}" title="Delete ticket"><i data-lucide="trash-2"></i> Delete</button></div></td></tr>`).join('') || `<tr><td colspan="7" class="empty-row">No tickets match your search.</td></tr>`;
     $('ticketCountLabel').textContent = `${list.length} ticket${list.length === 1 ? '' : 's'} shown`;
+    refreshIcons($('allTicketRows'));
   }
   function go(view) {
     if (!labels[view]) return;
@@ -217,7 +226,7 @@
     };
   }
   function ticketHTML(t) {
-    return `<div class="pass-ticket"><div class="pass-top"><div class="pass-topline"><span class="pass-brand">MGE<span>.</span></span><small>OFFICIAL EVENT PASS</small></div><div class="pass-event">${h(t.event_name || 'YOUR EVENT')}</div><div class="pass-admission">◈ &nbsp; ${h(String(t.ticket_type).toUpperCase())} ADMISSION</div></div><div class="pass-seam"></div><div class="pass-bottom"><div class="pass-info"><span class="pass-smalllabel">TICKET HOLDER</span><div class="pass-holder">${h(capitalizeName(t.holder_name))}</div><div class="pass-bottom-details"><div><span class="pass-smalllabel">DATE</span><strong class="pass-details-strong">${h(formatDate(t.event_date))}</strong></div><div><span class="pass-smalllabel">VENUE</span><strong class="pass-details-strong">${h(t.venue || 'TBA')}</strong></div></div></div><div class="pass-qrbox"><div class="pass-qr" data-qr="${h(t.ticket_id)}"></div><small>SCAN / VERIFY ID</small></div></div><div class="pass-bottomid"><strong>${h(t.ticket_id)}</strong></div></div>`;
+    return `<div class="pass-ticket"><div class="pass-top"><div class="pass-topline"><span class="pass-brand">MGE<span>.</span></span><small>OFFICIAL EVENT PASS</small></div><div class="pass-event">${h(t.event_name || 'YOUR EVENT')}</div><div class="pass-admission"><i data-lucide="ticket"></i> ${h(String(t.ticket_type).toUpperCase())} ADMISSION</div></div><div class="pass-seam"></div><div class="pass-bottom"><div class="pass-info"><span class="pass-smalllabel">TICKET HOLDER</span><div class="pass-holder">${h(capitalizeName(t.holder_name))}</div><div class="pass-bottom-details"><div><span class="pass-smalllabel">DATE</span><strong class="pass-details-strong">${h(formatDate(t.event_date))}</strong></div><div><span class="pass-smalllabel">VENUE</span><strong class="pass-details-strong">${h(t.venue || 'TBA')}</strong></div></div></div><div class="pass-qrbox"><div class="pass-qr" data-qr="${h(t.ticket_id)}"></div><small>SCAN / VERIFY ID</small></div></div><div class="pass-bottomid"><strong>${h(t.ticket_id)}</strong></div></div>`;
   }
   function renderQr(container) {
     if (!container) return;
@@ -232,7 +241,7 @@
       } catch (e) { console.warn('QR generation unavailable:', e); }
     });
   }
-  function mountTicket(id,t) { const container = $(id); container.innerHTML = ticketHTML(t); renderQr(container); }
+  function mountTicket(id,t) { const container = $(id); container.innerHTML = ticketHTML(t); renderQr(container); refreshIcons(container); }
   function updateLivePreview() { if ($('draftTicket')) mountTicket('draftTicket', collectDraft(false)); }
   function previewSubmit(e) {
     e.preventDefault();
@@ -284,7 +293,7 @@
   function closeModal(id) { $(id).classList.add('hidden'); if ([...document.querySelectorAll('.modal-backdrop')].every(m=>m.classList.contains('hidden'))) document.body.style.overflow = ''; }
   function showReady(t) {
     state.selected = t;
-    $('readyTitle').innerHTML = `Ticket ${t.delivery_status === 'sent_confirmed' ? 'details' : 'ready'} <span class="success-inline">✓</span>`;
+    $('readyTitle').innerHTML = `Ticket ${t.delivery_status === 'sent_confirmed' ? 'details' : 'ready'} <span class="success-inline"><i data-lucide="check"></i></span>`;
     $('readyTicketId').textContent = t.ticket_id;
     mountTicket('readyTicket',t);
     $('whatsappButton').classList.toggle('hidden', !t.phone);
@@ -292,9 +301,10 @@
     $('readyInstructions').textContent = t.phone
       ? 'Download the ticket PDF or image first. WhatsApp will open with a prefilled message. Attach the ticket and press Send in WhatsApp. Opening the chat alone does not send anything.'
       : 'This ticket has no WhatsApp number. Download the ticket and print it, or use the email draft and attach the ticket manually.';
-    $('markSentButton').textContent = t.delivery_status === 'sent_confirmed' ? '✓ Marked as sent by admin' : '✓ I sent this ticket — mark as sent';
+    $('markSentButton').innerHTML = t.delivery_status === 'sent_confirmed' ? '<i data-lucide="check-check"></i> Marked as sent by admin' : '<i data-lucide="check"></i> I sent this ticket — mark as sent';
     $('markSentButton').disabled = t.delivery_status === 'sent_confirmed';
     $('shareButton').classList.toggle('hidden', !Boolean(navigator.share && navigator.canShare));
+    refreshIcons($('readyModal'));
     showModal('readyModal');
   }
   async function openRecord(id) {
@@ -354,8 +364,9 @@
         persistLocal();
       }
       renderAll();
-      $('markSentButton').textContent = status === 'sent_confirmed' ? '✓ Marked as sent by admin' : '✓ I sent this ticket — mark as sent';
+      $('markSentButton').innerHTML = status === 'sent_confirmed' ? '<i data-lucide="check-check"></i> Marked as sent by admin' : '<i data-lucide="check"></i> I sent this ticket — mark as sent';
       $('markSentButton').disabled = status === 'sent_confirmed';
+      refreshIcons($('markSentButton'));
       if (status === 'sent_confirmed') toast('Marked sent based on your confirmation (not verified by WhatsApp).');
     } catch (err) { toast(`Could not update status: ${err.message}`, true); }
   }
@@ -570,7 +581,10 @@
     const video = $('scannerVideo');
     if (video) video.srcObject = null;
     $('scannerBox')?.classList.add('hidden');
-    if ($('scanToggleButton')) $('scanToggleButton').textContent = '⊡ Scan with camera';
+    if ($('scanToggleButton')) {
+      $('scanToggleButton').innerHTML = '<i data-lucide="camera"></i> Scan with camera';
+      refreshIcons($('scanToggleButton'));
+    }
   }
   async function startScanner() {
     if (!navigator.mediaDevices?.getUserMedia) {
@@ -587,7 +601,8 @@
       video.srcObject = stream;
       await video.play();
       $('scannerBox').classList.remove('hidden');
-      $('scanToggleButton').textContent = '⊡ Stop camera';
+      $('scanToggleButton').innerHTML = '<i data-lucide="camera-off"></i> Stop camera';
+      refreshIcons($('scanToggleButton'));
       $('scannerStatus').textContent = 'Point your camera at the ticket QR code…';
       const devices = await navigator.mediaDevices.enumerateDevices().catch(() => []);
       const cams = devices.filter((d) => d.kind === 'videoinput');
@@ -653,9 +668,17 @@
     const invalid=t.status==='void';
     const heading=invalid?'Ticket voided':checked?'Already checked in':'Valid ticket found';
     const note=invalid?'This ticket is not valid for entry.':checked?'This ID has already been used for admission.':'This ID belongs to the guest shown below.';
-    $('verifyResult').innerHTML=`<div class="verify-result-head"><span class="${invalid||checked?'bad-head':''}">${invalid?'×':checked?'!':'✓'}</span><div><h3>${heading}</h3><p>${note}</p></div></div><div class="verify-details"><div class="verify-detail"><small>Ticket holder</small><strong>${h(t.holder_name)}</strong></div><div class="verify-detail"><small>Ticket type</small><strong>${h(t.ticket_type)}</strong></div><div class="verify-detail"><small>Ticket ID</small><strong>${h(t.ticket_id)}</strong></div><div class="verify-detail"><small>Status</small><strong>${h(t.status==='checked_in'?'Checked in':t.status==='void'?'Voided':'Valid · not checked in')}</strong></div><div class="verify-detail"><small>Phone</small><strong>${t.phone?'+'+h(t.phone):'Not provided'}</strong></div><div class="verify-detail"><small>Email</small><strong>${h(t.email||'Not provided')}</strong></div><div class="verify-detail"><small>Event</small><strong>${h(t.event_name)}</strong></div><div class="verify-detail"><small>Event date</small><strong>${h(formatDate(t.event_date))}</strong></div></div><div class="verify-cta">${!checked&&!invalid?'<button class="btn btn-primary" id="checkInButton">✓ Mark as checked in</button>':''}<button class="btn btn-danger" id="verifyDeleteButton">Delete ticket</button></div>`;
+    const headIcon=invalid?'x-circle':checked?'alert-triangle':'check-circle-2';
+    $('verifyResult').innerHTML=`<div class="verify-result-head"><span class="${invalid||checked?'bad-head':''}"><i data-lucide="${headIcon}"></i></span><div><h3>${heading}</h3><p>${note}</p></div></div><div class="verify-details"><div class="verify-detail"><small>Ticket holder</small><strong>${h(t.holder_name)}</strong></div><div class="verify-detail"><small>Ticket type</small><strong>${h(t.ticket_type)}</strong></div><div class="verify-detail"><small>Ticket ID</small><strong>${h(t.ticket_id)}</strong></div><div class="verify-detail"><small>Status</small><strong>${h(t.status==='checked_in'?'Checked in':t.status==='void'?'Voided':'Valid · not checked in')}</strong></div><div class="verify-detail"><small>Phone</small><strong>${t.phone?'+'+h(t.phone):'Not provided'}</strong></div><div class="verify-detail"><small>Email</small><strong>${h(t.email||'Not provided')}</strong></div><div class="verify-detail"><small>Event</small><strong>${h(t.event_name)}</strong></div><div class="verify-detail"><small>Event date</small><strong>${h(formatDate(t.event_date))}</strong></div></div><div class="verify-cta">${!checked&&!invalid?'<button class="btn btn-primary" id="checkInButton"><i data-lucide="user-check"></i> Mark as checked in</button>':''}<button class="btn btn-outline" id="scanAnotherButton"><i data-lucide="scan-line"></i> Scan another ticket</button></div>`;
+    refreshIcons($('verifyResult'));
     $('checkInButton')?.addEventListener('click',()=>checkIn(t));
-    $('verifyDeleteButton')?.addEventListener('click',()=>deleteTicket(t.ticket_id, $('verifyDeleteButton')));
+    $('scanAnotherButton')?.addEventListener('click',()=>{
+      state.verifyTicket = null;
+      $('verifyInput').value = '';
+      $('verifyResult').classList.add('hidden');
+      $('verifyResult').innerHTML = '';
+      void startScanner();
+    });
   }
   async function checkIn(t) {
     if(!t || t.status!=='valid')return;
