@@ -1,4 +1,4 @@
-/* Passflow: browser-side ticket manager.
+/* MGE: browser-side ticket manager.
    Production data uses Supabase Auth + Postgres RLS. No service-role key is used. */
 (() => {
   'use strict';
@@ -6,15 +6,16 @@
   const $ = (id) => document.getElementById(id);
   const cfg = window.TICKET_APP_CONFIG || {};
   const isLive = Boolean(cfg.supabaseUrl?.trim() && cfg.supabaseAnonKey?.trim());
-  const storageKey = 'passflow-tickets-v1';
-  const settingsKey = 'passflow-event-settings-v1';
+  const storageKey = 'mge-tickets-v1';
+  const settingsKey = 'mge-event-settings-v1';
   const labels = { dashboard: 'Overview', create: 'Create Ticket', tickets: 'All Tickets', verify: 'Verify Ticket', settings: 'Settings' };
   const defaultSettings = { event_name: 'THE GRAND EXPERIENCE', event_date: '', venue: 'Your event venue' };
   const state = {
     client: null, tickets: [], activeView: 'dashboard',
     draftId: generateTicketId(), selected: null, confirmDraft: null, verifyTicket: null,
     settings: readStorage(settingsKey, defaultSettings), toastTimer: null,
-    loggedIn: false, user: null, saving: false, eventId: null
+    loggedIn: false, user: null, saving: false, eventId: null,
+    scanStream: null, scanRaf: 0, scanFacing: 'environment', scanCanvas: null, detector: null
   };
 
   function readStorage(key, fallback) {
@@ -91,8 +92,6 @@
         state.client = window.supabase.createClient(cfg.supabaseUrl.trim(), cfg.supabaseAnonKey.trim());
         $('modePill').innerHTML = '<i></i> Supabase live';
         $('modePill').classList.add('live');
-        $('connectionMode').textContent = 'Supabase — connected';
-        $('connectionNote').textContent = 'Ticket records are stored in your Supabase project and protected by row-level security.';
         $('logoutButton').classList.remove('hidden');
         const { data: { user }, error } = await state.client.auth.getUser();
         if (error || !user) return showLogin();
@@ -106,8 +105,6 @@
       state.tickets = readStorage(storageKey, []);
       if (!Array.isArray(state.tickets)) state.tickets = [];
       $('logoutButton').classList.add('hidden');
-      $('connectionMode').textContent = 'Local storage';
-      $('connectionNote').textContent = 'Ticket records are stored on this device.';
       $('sidebarEmail').textContent = 'Administrator';
       $('appRoot').classList.remove('hidden');
       renderAll();
@@ -149,6 +146,7 @@
     } finally { setBusy(button, false); }
   }
   async function logout() {
+    stopScanner();
     if (!isLive) return;
     await state.client.auth.signOut();
     state.user = null;
@@ -177,18 +175,19 @@
     $('statVip').textContent = rows.filter((t) => ['VIP','VVIP'].includes(t.ticket_type)).length.toLocaleString();
     $('statSent').textContent = rows.filter((t) => t.delivery_status === 'sent_confirmed').length.toLocaleString();
     $('statPending').textContent = rows.filter((t) => t.delivery_status !== 'sent_confirmed').length.toLocaleString();
-    $('recentRows').innerHTML = rows.slice(0,5).map((t) => `<tr><td>${nameCell(t)}</td><td><span class="ticket-id-text">${h(t.ticket_id)}</span></td><td>${typeBadge(t.ticket_type)}</td><td>${deliveryBadge(t.delivery_status)}</td></tr>`).join('') || `<tr><td colspan="4" class="empty-row">No tickets yet. Create your first ticket.</td></tr>`;
+    $('recentRows').innerHTML = rows.slice(0,5).map((t) => `<tr><td data-label="Holder">${nameCell(t)}</td><td data-label="Ticket ID"><span class="ticket-id-text">${h(t.ticket_id)}</span></td><td data-label="Type">${typeBadge(t.ticket_type)}</td><td data-label="Status">${deliveryBadge(t.delivery_status)}</td></tr>`).join('') || `<tr><td colspan="4" class="empty-row">No tickets yet. Create your first ticket.</td></tr>`;
   }
   function nameCell(t) { return `<span class="table-name"><span class="table-avatar">${h(initials(t.holder_name))}</span><span>${h(t.holder_name)}</span></span>`; }
   function renderTickets() {
     const q = $('ticketSearch').value.trim().toLowerCase();
     const type = $('ticketFilter').value;
     const list = state.tickets.filter((t) => (type === 'all' || t.ticket_type === type) && [t.ticket_id, t.holder_name, t.phone, t.email].some((value) => String(value || '').toLowerCase().includes(q)));
-    $('allTicketRows').innerHTML = list.map((t) => `<tr><td>${nameCell(t)}</td><td><span class="ticket-id-text">${h(t.ticket_id)}</span></td><td>${typeBadge(t.ticket_type)}</td><td>${h(formatCreated(t.created_at))}</td><td>${deliveryBadge(t.delivery_status)}</td><td><button class="table-action" data-open-ticket="${h(t.ticket_id)}">View / send →</button></td></tr>`).join('') || `<tr><td colspan="6" class="empty-row">No tickets match your search.</td></tr>`;
+    $('allTicketRows').innerHTML = list.map((t) => `<tr><td data-label="Holder">${nameCell(t)}</td><td data-label="Ticket ID"><span class="ticket-id-text">${h(t.ticket_id)}</span></td><td data-label="Type">${typeBadge(t.ticket_type)}</td><td data-label="Created">${h(formatCreated(t.created_at))}</td><td data-label="Delivery">${deliveryBadge(t.delivery_status)}</td><td data-label="" class="td-action"><button class="table-action" data-open-ticket="${h(t.ticket_id)}">View / send →</button></td></tr>`).join('') || `<tr><td colspan="6" class="empty-row">No tickets match your search.</td></tr>`;
     $('ticketCountLabel').textContent = `${list.length} ticket${list.length === 1 ? '' : 's'} shown`;
   }
   function go(view) {
     if (!labels[view]) return;
+    if (view !== 'verify') stopScanner();
     state.activeView = view;
     document.querySelectorAll('.view').forEach((el) => el.classList.toggle('active', el.id === `view-${view}`));
     document.querySelectorAll('.nav-link').forEach((el) => el.classList.toggle('active', el.dataset.view === view));
@@ -225,7 +224,7 @@
     };
   }
   function ticketHTML(t) {
-    return `<div class="pass-ticket"><div class="pass-top"><div class="pass-topline"><span class="pass-brand">passflow<span>.</span></span><small>OFFICIAL EVENT PASS</small></div><div class="pass-event">${h(t.event_name || 'YOUR EVENT')}</div><div class="pass-admission">✦ &nbsp; ${h(String(t.ticket_type).toUpperCase())} ADMISSION</div></div><div class="pass-seam"></div><div class="pass-bottom"><div class="pass-info"><span class="pass-smalllabel">TICKET HOLDER</span><div class="pass-holder">${h(capitalizeName(t.holder_name))}</div><div class="pass-bottom-details"><div><span class="pass-smalllabel">DATE</span><strong class="pass-details-strong">${h(formatDate(t.event_date))}</strong></div><div><span class="pass-smalllabel">VENUE</span><strong class="pass-details-strong">${h(t.venue || 'TBA')}</strong></div></div></div><div class="pass-qrbox"><div class="pass-qr" data-qr="${h(t.ticket_id)}"></div><small>SCAN / VERIFY ID</small></div></div><div class="pass-bottomid"><small>UNIQUE TICKET ID</small><strong>${h(t.ticket_id)}</strong></div></div>`;
+    return `<div class="pass-ticket"><div class="pass-top"><div class="pass-topline"><span class="pass-brand">MGE<span>.</span></span><small>OFFICIAL EVENT PASS</small></div><div class="pass-event">${h(t.event_name || 'YOUR EVENT')}</div><div class="pass-admission">◈ &nbsp; ${h(String(t.ticket_type).toUpperCase())} ADMISSION</div></div><div class="pass-seam"></div><div class="pass-bottom"><div class="pass-info"><span class="pass-smalllabel">TICKET HOLDER</span><div class="pass-holder">${h(capitalizeName(t.holder_name))}</div><div class="pass-bottom-details"><div><span class="pass-smalllabel">DATE</span><strong class="pass-details-strong">${h(formatDate(t.event_date))}</strong></div><div><span class="pass-smalllabel">VENUE</span><strong class="pass-details-strong">${h(t.venue || 'TBA')}</strong></div></div></div><div class="pass-qrbox"><div class="pass-qr" data-qr="${h(t.ticket_id)}"></div><small>SCAN / VERIFY ID</small></div></div><div class="pass-bottomid"><strong>${h(t.ticket_id)}</strong></div></div>`;
   }
   function renderQr(container) {
     if (!container) return;
@@ -403,11 +402,11 @@
     ctx.arc(1430,0,480,0,Math.PI*2);ctx.stroke();
     ctx.beginPath();ctx.strokeStyle='rgba(255,255,255,0.05)';ctx.lineWidth=60;
     ctx.arc(1430,0,305,0,Math.PI*2);ctx.stroke();
-    ctx.fillStyle='#ffffff';ctx.font='800 35px Manrope,Arial,sans-serif';ctx.fillText('passflow',90,114);
-    ctx.fillStyle='#8ec5ff';ctx.fillText('.',244,114);
+    ctx.fillStyle='#ffffff';ctx.font='800 35px Manrope,Arial,sans-serif';ctx.fillText('MGE',90,114);
+    ctx.fillStyle='#8ec5ff';ctx.fillText('.',90+ctx.measureText('MGE').width+2,114);
     ctx.fillStyle='#bdcde1';ctx.font='700 22px Manrope,Arial,sans-serif';ctx.textAlign='right';ctx.fillText('OFFICIAL EVENT PASS',1400,110);ctx.textAlign='left';
     ctx.fillStyle='#ffffff';fittedText(ctx,t.event_name||'YOUR EVENT',90,285,1270,69,34);
-    ctx.fillStyle='#f7d6a4';ctx.font='800 23px Manrope,Arial,sans-serif';ctx.fillText(`✦  ${String(t.ticket_type).toUpperCase()} ADMISSION`,90,376);
+    ctx.fillStyle='#f7d6a4';ctx.font='800 23px Manrope,Arial,sans-serif';ctx.fillText(`◈  ${String(t.ticket_type).toUpperCase()} ADMISSION`,90,376);
     ctx.fillStyle='#fff';ctx.fillRect(25,540,1450,285);
     ctx.fillStyle='#f4f6f8';ctx.beginPath();ctx.arc(25,540,23,0,Math.PI*2);ctx.fill();ctx.beginPath();ctx.arc(1475,540,23,0,Math.PI*2);ctx.fill();
     ctx.beginPath();ctx.setLineDash([14,12]);ctx.moveTo(50,540);ctx.lineTo(1450,540);ctx.lineWidth=3;ctx.strokeStyle='#e3e8f0';ctx.stroke();ctx.setLineDash([]);
@@ -416,8 +415,7 @@
     ctx.fillStyle='#93a2b5';ctx.font='800 17px Manrope,Arial,sans-serif';ctx.fillText('DATE',90,705);ctx.fillText('VENUE',460,705);
     ctx.fillStyle='#233851';ctx.font='700 23px Manrope,Arial,sans-serif';ctx.fillText(formatDate(t.event_date),90,742);
     fittedText(ctx,t.venue||'TBA',460,742,530,23,16);
-    ctx.fillStyle='#8ea1b7';ctx.font='800 16px Manrope,Arial,sans-serif';ctx.fillText('TICKET ID',90,792);
-    ctx.fillStyle='#466588';ctx.font='800 20px Manrope,Arial,sans-serif';ctx.fillText(t.ticket_id,208,792);
+    ctx.fillStyle='#466588';ctx.font='800 20px Manrope,Arial,sans-serif';ctx.fillText(t.ticket_id,90,792);
     const qr=await getQrImage(t.ticket_id);
     if (qr) ctx.drawImage(qr,1200,565,197,197);
     else { ctx.strokeStyle='#9dafc4';ctx.lineWidth=3;ctx.strokeRect(1200,565,197,197);ctx.fillStyle='#75889e';ctx.font='700 17px Arial';ctx.textAlign='center';ctx.fillText('VERIFY BY ID',1298,661);ctx.textAlign='left'; }
@@ -475,25 +473,147 @@
       toast('Share sheet opened. Confirm the correct recipient and send in your chosen app.');
     }catch(err){if(err.name!=='AbortError')toast(err.message,true);}
   }
-  async function verifyTicket(e) {
-    e.preventDefault();
-    const id=$('verifyInput').value.trim().toUpperCase();
-    if(!id)return;
-    const btn=$('verifyButton');setBusy(btn,true,'Checking…');
-    state.verifyTicket=null;
+  function extractTicketId(raw) {
+    const text = String(raw || '').trim();
+    const match = text.match(/TKT-[A-Z0-9-]+/i);
+    return (match ? match[0] : text).toUpperCase();
+  }
+  async function lookupAndVerify(rawId) {
+    const id = extractTicketId(rawId);
+    if (!id) return;
+    $('verifyInput').value = id;
+    const btn = $('verifyButton'); setBusy(btn, true, 'Checking…');
+    state.verifyTicket = null;
     $('verifyResult').classList.remove('hidden');
-    $('verifyResult').innerHTML='<p>Searching ticket records…</p>';
+    $('verifyResult').innerHTML = '<p>Searching ticket records…</p>';
     try {
       let ticket;
-      if(isLive) {
-        const {data,error}=await state.client.from('tickets').select('*').eq('ticket_id',id).maybeSingle();
-        if(error)throw error;
-        ticket=data;
-      } else ticket=state.tickets.find(t=>t.ticket_id.toUpperCase()===id);
-      state.verifyTicket=ticket||null;
+      if (isLive) {
+        const { data, error } = await state.client.from('tickets').select('*').eq('ticket_id', id).maybeSingle();
+        if (error) throw error;
+        ticket = data;
+      } else ticket = state.tickets.find((t) => t.ticket_id.toUpperCase() === id);
+      state.verifyTicket = ticket || null;
       renderVerifyResult(ticket);
-    }catch(err){$('verifyResult').innerHTML=`<div class="verify-missing">Could not verify ticket: ${h(err.message)}</div>`;}
-    finally{setBusy(btn,false);}
+    } catch (err) { $('verifyResult').innerHTML = `<div class="verify-missing">Could not verify ticket: ${h(err.message)}</div>`; }
+    finally { setBusy(btn, false); }
+  }
+  async function verifyTicket(e) {
+    e.preventDefault();
+    await lookupAndVerify($('verifyInput').value);
+  }
+  async function getDetector() {
+    if (state.detector) return state.detector;
+    if ('BarcodeDetector' in window) {
+      try {
+        const formats = await window.BarcodeDetector.getSupportedFormats();
+        const wanted = ['qr_code', 'code_128', 'code_39', 'ean_13', 'pdf417', 'aztec', 'data_matrix'].filter((f) => formats.includes(f));
+        if (wanted.length) state.detector = new window.BarcodeDetector({ formats: wanted });
+      } catch { /* fall back to jsQR */ }
+    }
+    return state.detector;
+  }
+  async function decodeSource(source, width, height) {
+    const detector = await getDetector();
+    if (detector) {
+      try {
+        const hits = await detector.detect(source);
+        if (hits?.length && hits[0].rawValue) return hits[0].rawValue;
+      } catch { /* fall through to jsQR */ }
+    }
+    if (!window.jsQR || !width || !height) return null;
+    if (!state.scanCanvas) state.scanCanvas = document.createElement('canvas');
+    const maxDim = 720;
+    const scale = Math.min(1, maxDim / Math.max(width, height));
+    const w = Math.max(1, Math.round(width * scale));
+    const h = Math.max(1, Math.round(height * scale));
+    state.scanCanvas.width = w;
+    state.scanCanvas.height = h;
+    const ctx = state.scanCanvas.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(source, 0, 0, w, h);
+    const img = ctx.getImageData(0, 0, w, h);
+    const code = window.jsQR(img.data, w, h, { inversionAttempts: 'attemptBoth' });
+    return code?.data || null;
+  }
+  function stopScanner() {
+    if (state.scanRaf) { cancelAnimationFrame(state.scanRaf); state.scanRaf = 0; }
+    if (state.scanStream) { state.scanStream.getTracks().forEach((t) => t.stop()); state.scanStream = null; }
+    const video = $('scannerVideo');
+    if (video) video.srcObject = null;
+    $('scannerBox')?.classList.add('hidden');
+    if ($('scanToggleButton')) $('scanToggleButton').textContent = '⊡ Scan with camera';
+  }
+  async function startScanner() {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      return toast('Camera access is not available in this browser. Use "Scan from image" or type the ID.', true);
+    }
+    stopScanner();
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: state.scanFacing }, width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: false
+      });
+      state.scanStream = stream;
+      const video = $('scannerVideo');
+      video.srcObject = stream;
+      await video.play();
+      $('scannerBox').classList.remove('hidden');
+      $('scanToggleButton').textContent = '⊡ Stop camera';
+      $('scannerStatus').textContent = 'Point your camera at the ticket QR code…';
+      const devices = await navigator.mediaDevices.enumerateDevices().catch(() => []);
+      const cams = devices.filter((d) => d.kind === 'videoinput');
+      $('switchCameraButton').classList.toggle('hidden', cams.length < 2);
+      const tick = async () => {
+        if (!state.scanStream) return;
+        if (video.readyState >= 2 && video.videoWidth > 0) {
+          const raw = await decodeSource(video, video.videoWidth, video.videoHeight);
+          if (raw) {
+            const id = extractTicketId(raw);
+            if (id) {
+              if (navigator.vibrate) navigator.vibrate(80);
+              stopScanner();
+              toast(`Scanned ${id}`);
+              await lookupAndVerify(id);
+              return;
+            }
+          }
+        }
+        state.scanRaf = requestAnimationFrame(tick);
+      };
+      state.scanRaf = requestAnimationFrame(tick);
+    } catch (err) {
+      stopScanner();
+      const denied = err?.name === 'NotAllowedError' || err?.name === 'PermissionDeniedError';
+      toast(denied ? 'Camera permission was denied. Allow camera access or use "Scan from image".' : `Could not start camera: ${err.message}`, true);
+    }
+  }
+  function toggleScanner() {
+    if (state.scanStream) stopScanner();
+    else void startScanner();
+  }
+  async function flipCamera() {
+    state.scanFacing = state.scanFacing === 'environment' ? 'user' : 'environment';
+    if (state.scanStream) await startScanner();
+  }
+  async function scanFromImage(e) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      const url = URL.createObjectURL(file);
+      const img = await new Promise((resolve, reject) => {
+        const el = new Image();
+        el.onload = () => resolve(el);
+        el.onerror = () => reject(new Error('Could not read the selected image.'));
+        el.src = url;
+      });
+      URL.revokeObjectURL(url);
+      const raw = await decodeSource(img, img.naturalWidth || img.width, img.naturalHeight || img.height);
+      if (!raw) return toast('No QR code or barcode was detected in that image.', true);
+      const id = extractTicketId(raw);
+      toast(`Scanned ${id}`);
+      await lookupAndVerify(id);
+    } catch (err) { toast(err.message || 'Could not scan image.', true); }
   }
   function renderVerifyResult(t) {
     if (!t) {
@@ -599,6 +719,11 @@
     $('refreshButton').addEventListener('click',async()=>{await loadTickets();toast('Ticket list refreshed.');});
     $('allTicketRows').addEventListener('click',e=>{const button=e.target.closest('[data-open-ticket]');if(button)void openRecord(button.dataset.openTicket);});
     $('verifyForm').addEventListener('submit',verifyTicket);
+    $('scanToggleButton').addEventListener('click',toggleScanner);
+    $('stopScanButton').addEventListener('click',stopScanner);
+    $('switchCameraButton').addEventListener('click',flipCamera);
+    $('scanImageButton').addEventListener('click',()=>$('scanImageInput').click());
+    $('scanImageInput').addEventListener('change',scanFromImage);
     $('settingsForm').addEventListener('submit',saveSettings);
     $('downloadPdfButton').addEventListener('click',downloadPdf);
     $('downloadPngButton').addEventListener('click',downloadPng);

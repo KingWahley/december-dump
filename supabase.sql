@@ -1,4 +1,4 @@
--- PASSFLOW: Run this once in the Supabase SQL Editor (safe to re-run).
+-- MGE: Run this once in the Supabase SQL Editor (safe to re-run).
 -- 1. Create the admin user in Authentication > Users (kingwahley@gmail.com).
 -- 2. Run this whole script. The final statement authorizes that admin.
 -- IMPORTANT: The frontend uses only the publishable/anon key. NEVER embed service_role/secret keys.
