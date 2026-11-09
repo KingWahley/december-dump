@@ -226,19 +226,19 @@
     };
   }
   function ticketHTML(t) {
-    return `<div class="pass-ticket"><div class="pass-top"><div class="pass-topline"><span class="pass-brand">MGE<span>.</span></span><small>OFFICIAL EVENT PASS</small></div><div class="pass-event">${h(t.event_name || 'YOUR EVENT')}</div><div class="pass-admission"><i data-lucide="ticket"></i> ${h(String(t.ticket_type).toUpperCase())} ADMISSION</div></div><div class="pass-seam"></div><div class="pass-bottom"><div class="pass-info"><span class="pass-smalllabel">TICKET HOLDER</span><div class="pass-holder">${h(capitalizeName(t.holder_name))}</div><div class="pass-bottom-details"><div><span class="pass-smalllabel">DATE</span><strong class="pass-details-strong">${h(formatDate(t.event_date))}</strong></div><div><span class="pass-smalllabel">VENUE</span><strong class="pass-details-strong">${h(t.venue || 'TBA')}</strong></div></div></div><div class="pass-qrbox"><div class="pass-qr" data-qr="${h(t.ticket_id)}"></div><small>SCAN / VERIFY ID</small></div></div><div class="pass-bottomid"><strong>${h(t.ticket_id)}</strong></div></div>`;
+    const title = `${t.event_name || 'YOUR EVENT'}${t.venue ? ` — ${t.venue}` : ''}`;
+    return `<div class="pass-ticket"><div class="pass-main"><div class="pass-banner"><img src="ticket-banner.jpg" alt="" class="pass-banner-img" /></div><div class="pass-body"><div class="pass-headline">${h(title.toUpperCase())}</div><div class="pass-grid"><div class="pass-left-col"><div class="pass-meta-line">DATE: ${h(formatDate(t.event_date).toUpperCase())}</div><div class="pass-meta-line">VENUE: ${h((t.venue || 'TBA').toUpperCase())}</div><div class="pass-barcode-wrap"><svg class="pass-barcode" data-barcode="${h(t.ticket_id)}"></svg><div class="pass-barcode-id">${h(t.ticket_id)}</div></div></div><div class="pass-right-col"><div class="pass-flag-row"><span class="ng-flag" aria-hidden="true"></span><span class="pass-holder-line">HOLDER: ${h(capitalizeName(t.holder_name).toUpperCase())}</span></div><div class="pass-table"><div class="pass-table-row"><div class="pass-cell pass-cell-grow">TICKET TYPE: ${h(String(t.ticket_type).toUpperCase())}</div><div class="pass-cell pass-cell-badge">MGE PASS</div></div><div class="pass-table-row"><div class="pass-cell pass-cell-full">ADMIT: ${h(capitalizeName(t.holder_name).toUpperCase())}</div></div></div></div></div></div></div><div class="pass-stub"><span>TICKET</span></div></div>`;
   }
   function renderQr(container) {
     if (!container) return;
-    if (!window.QRCode) {
-      container.querySelectorAll('[data-qr]').forEach((node) => { node.innerHTML = '<span class="qr-fallback">ID<br>CHECK</span>'; });
-      return;
-    }
-    container.querySelectorAll('[data-qr]').forEach((node) => {
-      try {
-        node.innerHTML = '';
-        new window.QRCode(node, { text: node.dataset.qr, width: 80, height: 80, colorDark: '#17283b', colorLight: '#ffffff', correctLevel: window.QRCode.CorrectLevel.M });
-      } catch (e) { console.warn('QR generation unavailable:', e); }
+    container.querySelectorAll('[data-barcode]').forEach((svg) => {
+      const value = svg.dataset.barcode || 'TKT-000000';
+      if (window.JsBarcode) {
+        try {
+          window.JsBarcode(svg, value, { format: 'CODE128', displayValue: false, margin: 0, width: 1.7, height: 44, lineColor: '#111111', background: 'transparent' });
+          return;
+        } catch (e) { console.warn('Barcode generation failed:', e); }
+      }
     });
   }
   function mountTicket(id,t) { const container = $(id); container.innerHTML = ticketHTML(t); renderQr(container); refreshIcons(container); }
@@ -428,38 +428,160 @@
     } catch { return null; }
     finally { div.remove(); }
   }
+  async function getBannerImage() {
+    if (state.bannerImg?.complete && state.bannerImg.naturalWidth) return state.bannerImg;
+    try {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      await new Promise((resolve, reject) => { img.onload = resolve; img.onerror = reject; img.src = 'ticket-banner.jpg'; });
+      state.bannerImg = img;
+      return img;
+    } catch { return null; }
+  }
+  function drawTopCover(ctx, img, dx, dy, dw, dh) {
+    const iw = img.naturalWidth || img.width;
+    const ih = img.naturalHeight || img.height;
+    if (!iw || !ih) return;
+    // Scale image to fill the destination width, anchored at the very top (sy = 0)
+    const scale = Math.max(dw / iw, dh / ih);
+    const sw = Math.min(iw, dw / scale);
+    const sh = Math.min(ih, dh / scale);
+    const sx = Math.max(0, (iw - sw) / 2);
+    const sy = 0; // Top-aligned crop: never center vertically
+    ctx.drawImage(img, sx, sy, sw, sh, dx, dy, dw, dh);
+  }
+  function getBarcodeCanvas(text) {
+    if (!window.JsBarcode) return null;
+    try {
+      const c = document.createElement('canvas');
+      window.JsBarcode(c, text, { format: 'CODE128', displayValue: false, margin: 0, width: 3, height: 92, lineColor: '#111111', background: '#ffffff' });
+      return c;
+    } catch { return null; }
+  }
   async function ticketCanvas(t) {
     const canvas = document.createElement('canvas');
-    canvas.width=1500; canvas.height=850;
+    canvas.width = 1500; canvas.height = 850;
     const ctx = canvas.getContext('2d');
-    ctx.fillStyle='#f4f6f8'; ctx.fillRect(0,0,1500,850);
+    ctx.fillStyle = '#f2f4f7'; ctx.fillRect(0, 0, 1500, 850);
+
+    // Subtle drop shadow + rotated ticket stub
     ctx.save();
-    rounded(ctx,25,25,1450,800,34);ctx.clip();
-    const grad=ctx.createLinearGradient(0,0,1500,500);
-    grad.addColorStop(0,'#14243a');grad.addColorStop(1,'#2e4b6b');
-    ctx.fillStyle=grad;ctx.fillRect(25,25,1450,515);
-    ctx.beginPath();ctx.strokeStyle='rgba(255,255,255,0.07)';ctx.lineWidth=80;
-    ctx.arc(1430,0,480,0,Math.PI*2);ctx.stroke();
-    ctx.beginPath();ctx.strokeStyle='rgba(255,255,255,0.05)';ctx.lineWidth=60;
-    ctx.arc(1430,0,305,0,Math.PI*2);ctx.stroke();
-    ctx.fillStyle='#ffffff';ctx.font='800 35px Manrope,Arial,sans-serif';ctx.fillText('MGE',90,114);
-    ctx.fillStyle='#8ec5ff';ctx.fillText('.',90+ctx.measureText('MGE').width+2,114);
-    ctx.fillStyle='#bdcde1';ctx.font='700 22px Manrope,Arial,sans-serif';ctx.textAlign='right';ctx.fillText('OFFICIAL EVENT PASS',1400,110);ctx.textAlign='left';
-    ctx.fillStyle='#ffffff';fittedText(ctx,t.event_name||'YOUR EVENT',90,285,1270,69,34);
-    ctx.fillStyle='#f7d6a4';ctx.font='800 23px Manrope,Arial,sans-serif';ctx.fillText(`◈  ${String(t.ticket_type).toUpperCase()} ADMISSION`,90,376);
-    ctx.fillStyle='#fff';ctx.fillRect(25,540,1450,285);
-    ctx.fillStyle='#f4f6f8';ctx.beginPath();ctx.arc(25,540,23,0,Math.PI*2);ctx.fill();ctx.beginPath();ctx.arc(1475,540,23,0,Math.PI*2);ctx.fill();
-    ctx.beginPath();ctx.setLineDash([14,12]);ctx.moveTo(50,540);ctx.lineTo(1450,540);ctx.lineWidth=3;ctx.strokeStyle='#e3e8f0';ctx.stroke();ctx.setLineDash([]);
-    ctx.fillStyle='#93a2b5';ctx.font='800 20px Manrope,Arial,sans-serif';ctx.fillText('TICKET HOLDER',90,600);
-    ctx.fillStyle='#17263c';fittedText(ctx,capitalizeName(t.holder_name),90,657,950,44,27);
-    ctx.fillStyle='#93a2b5';ctx.font='800 17px Manrope,Arial,sans-serif';ctx.fillText('DATE',90,705);ctx.fillText('VENUE',460,705);
-    ctx.fillStyle='#233851';ctx.font='700 23px Manrope,Arial,sans-serif';ctx.fillText(formatDate(t.event_date),90,742);
-    fittedText(ctx,t.venue||'TBA',460,742,530,23,16);
-    ctx.fillStyle='#466588';ctx.font='800 20px Manrope,Arial,sans-serif';ctx.fillText(t.ticket_id,90,792);
-    const qr=await getQrImage(t.ticket_id);
-    if (qr) ctx.drawImage(qr,1200,565,197,197);
-    else { ctx.strokeStyle='#9dafc4';ctx.lineWidth=3;ctx.strokeRect(1200,565,197,197);ctx.fillStyle='#75889e';ctx.font='700 17px Arial';ctx.textAlign='center';ctx.fillText('VERIFY BY ID',1298,661);ctx.textAlign='left'; }
-    ctx.fillStyle='#92a3b5';ctx.font='800 14px Manrope,Arial,sans-serif';ctx.textAlign='center';ctx.fillText('SCAN / VERIFY ID',1298,790);
+    ctx.translate(750, 425);
+    ctx.rotate(-0.075);
+    ctx.translate(-700, -370);
+
+    const W = 1400, H = 740, stubX = 1245, bannerH = 385;
+
+    ctx.save();
+    ctx.shadowColor = 'rgba(10, 18, 32, 0.24)';
+    ctx.shadowBlur = 36;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 18;
+    rounded(ctx, 0, 0, W, H, 18);
+    ctx.fillStyle = '#ffffff';
+    ctx.fill();
+    ctx.restore();
+
+    ctx.save();
+    rounded(ctx, 0, 0, W, H, 18);
+    ctx.clip();
+
+    // Top event artwork banner — cropped from the top edge (sy = 0)
+    ctx.fillStyle = '#0d1b2a';
+    ctx.fillRect(0, 0, W, bannerH);
+    const bannerImg = await getBannerImage();
+    if (bannerImg) drawTopCover(ctx, bannerImg, 0, 0, stubX, bannerH);
+    ctx.fillStyle = '#07050c';
+    ctx.fillRect(stubX, 0, W - stubX, bannerH);
+
+    // White lower body
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, bannerH, W, H - bannerH);
+
+    // Event headline (bold condensed uppercase)
+    const headline = `${t.event_name || 'YOUR EVENT'}${t.venue ? ` — ${t.venue}` : ''}`.toUpperCase();
+    ctx.fillStyle = '#111111';
+    fittedText(ctx, headline, 46, bannerH + 64, stubX - 88, 52, 26);
+
+    // Left column: Date, Venue, 1D Barcode + ID
+    ctx.fillStyle = '#151515';
+    ctx.font = '800 24px "Bebas Neue", Manrope, Arial, sans-serif';
+    ctx.fillText(`DATE: ${formatDate(t.event_date).toUpperCase()}`, 46, bannerH + 112);
+    fittedText(ctx, `VENUE: ${(t.venue || 'TBA').toUpperCase()}`, 46, bannerH + 146, 515, 24, 16);
+
+    const bc = getBarcodeCanvas(t.ticket_id);
+    if (bc) {
+      ctx.drawImage(bc, 46, bannerH + 165, 480, 96);
+    } else {
+      for (let x = 46, i = 0; x < 520; x += (i % 3 === 0 ? 7 : 4), i++) {
+        ctx.fillStyle = '#111111';
+        ctx.fillRect(x, bannerH + 165, i % 2 === 0 ? 3 : 1.5, 92);
+      }
+    }
+    ctx.fillStyle = '#111111';
+    ctx.font = '800 29px Manrope, Arial, sans-serif';
+    ctx.fillText(t.ticket_id, 46, bannerH + 295);
+
+    // Right column: Nigerian flag + Holder + Boxed Ticket Type table
+    const rightX = 575, rightW = stubX - rightX - 38;
+    ctx.fillStyle = '#008753';
+    ctx.fillRect(rightX, bannerH + 88, 26, 46);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(rightX + 26, bannerH + 88, 26, 46);
+    ctx.fillStyle = '#008753';
+    ctx.fillRect(rightX + 52, bannerH + 88, 26, 46);
+    ctx.strokeStyle = '#d5dce4';
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(rightX, bannerH + 88, 78, 46);
+
+    ctx.fillStyle = '#111111';
+    fittedText(ctx, `HOLDER: ${capitalizeName(t.holder_name).toUpperCase()}`, rightX + 96, bannerH + 122, rightW - 96, 28, 17);
+
+    // Boxed table
+    const boxY = bannerH + 158, boxH = 124, rowH = 62, splitX = rightX + Math.round(rightW * 0.68);
+    ctx.strokeStyle = '#181818';
+    ctx.lineWidth = 2.5;
+    ctx.strokeRect(rightX, boxY, rightW, boxH);
+    ctx.beginPath();
+    ctx.moveTo(rightX, boxY + rowH); ctx.lineTo(rightX + rightW, boxY + rowH);
+    ctx.moveTo(splitX, boxY); ctx.lineTo(splitX, boxY + rowH);
+    ctx.stroke();
+
+    ctx.fillStyle = '#111111';
+    fittedText(ctx, `TICKET TYPE: ${String(t.ticket_type).toUpperCase()}`, rightX + 16, boxY + 40, splitX - rightX - 28, 23, 14);
+    fittedText(ctx, 'MGE PASS', splitX + 16, boxY + 40, rightX + rightW - splitX - 28, 23, 15);
+    fittedText(ctx, `ADMIT: ${capitalizeName(t.holder_name).toUpperCase()}`, rightX + 16, boxY + rowH + 40, rightW - 32, 22, 14);
+
+    // Perforated stub line (white on banner, dark on white body)
+    ctx.beginPath();
+    ctx.setLineDash([12, 10]);
+    ctx.moveTo(stubX, 14); ctx.lineTo(stubX, bannerH);
+    ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(255,255,255,0.85)'; ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(stubX, bannerH); ctx.lineTo(stubX, H - 14);
+    ctx.strokeStyle = '#222222'; ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Vertical "TICKET" text on stub
+    ctx.save();
+    ctx.translate(stubX + (W - stubX) / 2 + 12, bannerH + (H - bannerH) / 2);
+    ctx.rotate(-Math.PI / 2);
+    ctx.fillStyle = '#111111';
+    ctx.font = '800 36px Manrope, Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('TICKET', 0, 0);
+    ctx.restore();
+
+    // Scalloped perforation notches along left & right edges
+    ctx.fillStyle = '#f2f4f7';
+    for (let y = 34; y < H - 20; y += 30) {
+      ctx.beginPath(); ctx.arc(0, y, 8.5, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(W, y, 8.5, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.beginPath(); ctx.arc(stubX, 0, 11, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(stubX, H, 11, 0, Math.PI * 2); ctx.fill();
+
+    ctx.restore();
     ctx.restore();
     return canvas;
   }
@@ -559,11 +681,11 @@
       try {
         const hits = await detector.detect(source);
         if (hits?.length && hits[0].rawValue) return hits[0].rawValue;
-      } catch { /* fall through to jsQR */ }
+      } catch { /* fall through to ZXing / jsQR */ }
     }
-    if (!window.jsQR || !width || !height) return null;
+    if (!width || !height) return null;
     if (!state.scanCanvas) state.scanCanvas = document.createElement('canvas');
-    const maxDim = 720;
+    const maxDim = 960;
     const scale = Math.min(1, maxDim / Math.max(width, height));
     const w = Math.max(1, Math.round(width * scale));
     const h = Math.max(1, Math.round(height * scale));
@@ -571,6 +693,16 @@
     state.scanCanvas.height = h;
     const ctx = state.scanCanvas.getContext('2d', { willReadFrequently: true });
     ctx.drawImage(source, 0, 0, w, h);
+    if (window.ZXing?.HTMLCanvasElementLuminanceSource) {
+      try {
+        if (!state.zxingReader) state.zxingReader = new window.ZXing.MultiFormatReader();
+        const lum = new window.ZXing.HTMLCanvasElementLuminanceSource(state.scanCanvas);
+        const bitmap = new window.ZXing.BinaryBitmap(new window.ZXing.HybridBinarizer(lum));
+        const res = state.zxingReader.decode(bitmap);
+        if (res?.getText?.()) return res.getText();
+      } catch { /* no barcode found in frame */ }
+    }
+    if (!window.jsQR) return null;
     const img = ctx.getImageData(0, 0, w, h);
     const code = window.jsQR(img.data, w, h, { inversionAttempts: 'attemptBoth' });
     return code?.data || null;
@@ -603,7 +735,7 @@
       $('scannerBox').classList.remove('hidden');
       $('scanToggleButton').innerHTML = '<i data-lucide="camera-off"></i> Stop camera';
       refreshIcons($('scanToggleButton'));
-      $('scannerStatus').textContent = 'Point your camera at the ticket QR code…';
+      $('scannerStatus').textContent = 'Align the ticket barcode inside the rectangle…';
       const devices = await navigator.mediaDevices.enumerateDevices().catch(() => []);
       const cams = devices.filter((d) => d.kind === 'videoinput');
       $('switchCameraButton').classList.toggle('hidden', cams.length < 2);
