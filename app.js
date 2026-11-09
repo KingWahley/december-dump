@@ -227,19 +227,20 @@
   }
   function ticketHTML(t) {
     const title = `${t.event_name || 'YOUR EVENT'}${t.venue ? ` — ${t.venue}` : ''}`;
-    return `<div class="pass-ticket"><div class="pass-main"><div class="pass-banner"><img src="ticket-banner.jpg" alt="" class="pass-banner-img" /></div><div class="pass-body"><div class="pass-headline">${h(title.toUpperCase())}</div><div class="pass-grid"><div class="pass-left-col"><div class="pass-meta-line">DATE: ${h(formatDate(t.event_date).toUpperCase())}</div><div class="pass-meta-line">VENUE: ${h((t.venue || 'TBA').toUpperCase())}</div><div class="pass-barcode-wrap"><svg class="pass-barcode" data-barcode="${h(t.ticket_id)}"></svg><div class="pass-barcode-id">${h(t.ticket_id)}</div></div></div><div class="pass-right-col"><div class="pass-flag-row"><span class="ng-flag" aria-hidden="true"></span><span class="pass-holder-line">HOLDER: ${h(capitalizeName(t.holder_name).toUpperCase())}</span></div><div class="pass-table"><div class="pass-table-row"><div class="pass-cell pass-cell-grow">TICKET TYPE: ${h(String(t.ticket_type).toUpperCase())}</div><div class="pass-cell pass-cell-badge">MGE PASS</div></div><div class="pass-table-row"><div class="pass-cell pass-cell-full">ADMIT: ${h(capitalizeName(t.holder_name).toUpperCase())}</div></div></div></div></div></div></div><div class="pass-stub"><span>TICKET</span></div></div>`;
+    return `<div class="pass-ticket"><div class="pass-main"><div class="pass-banner"><img src="ticket-banner.jpg" alt="" class="pass-banner-img" /></div><div class="pass-body"><div class="pass-headline">${h(title.toUpperCase())}</div><div class="pass-grid"><div class="pass-left-col"><div class="pass-meta-line">DATE: ${h(formatDate(t.event_date).toUpperCase())}</div><div class="pass-meta-line">VENUE: ${h((t.venue || 'TBA').toUpperCase())}</div><div class="pass-barcode-wrap"><div class="pass-qr" data-qr="${h(t.ticket_id)}"></div><div class="pass-barcode-id">${h(t.ticket_id)}</div></div></div><div class="pass-right-col"><div class="pass-flag-row"><span class="ng-flag" aria-hidden="true"></span><span class="pass-holder-line">HOLDER: ${h(capitalizeName(t.holder_name).toUpperCase())}</span></div><div class="pass-table"><div class="pass-table-row"><div class="pass-cell pass-cell-grow">TICKET TYPE: ${h(String(t.ticket_type).toUpperCase())}</div><div class="pass-cell pass-cell-badge">MGE PASS</div></div><div class="pass-table-row"><div class="pass-cell pass-cell-full">ADMIT: ${h(capitalizeName(t.holder_name).toUpperCase())}</div></div></div></div></div></div></div><div class="pass-stub"><span>TICKET</span></div></div>`;
   }
   function renderQr(container) {
     if (!container) return;
-    container.querySelectorAll('[data-barcode]').forEach((svg) => {
-      const value = svg.dataset.barcode || 'TKT-000000';
-      if (window.JsBarcode) {
+    container.querySelectorAll('[data-qr]').forEach((box) => {
+      box.innerHTML = '';
+      const value = box.dataset.qr || 'TKT-000000';
+      if (window.QRCode) {
         try {
-          window.JsBarcode(svg, value, { format: 'CODE128', displayValue: false, margin: 10, width: 2, height: 50, lineColor: '#000000', background: '#ffffff' });
-          svg.setAttribute('preserveAspectRatio', 'none');
+          new window.QRCode(box, { text: value, width: 160, height: 160, colorDark: '#000000', colorLight: '#ffffff', correctLevel: window.QRCode.CorrectLevel.M });
           return;
-        } catch (e) { console.warn('Barcode generation failed:', e); }
+        } catch (e) { console.warn('QR generation failed:', e); }
       }
+      box.textContent = 'QR';
     });
   }
   function mountTicket(id,t) { const container = $(id); container.innerHTML = ticketHTML(t); renderQr(container); refreshIcons(container); }
@@ -502,27 +503,27 @@
     ctx.fillStyle = '#111111';
     fittedText(ctx, headline, 46, bannerH + 64, stubX - 88, 52, 26);
 
-    // Left column: Date, Venue, 1D Barcode + ID
+    // Left column: Date, Venue, QR Code + ID
     ctx.fillStyle = '#151515';
     ctx.font = '800 24px "Bebas Neue", Manrope, Arial, sans-serif';
     ctx.fillText(`DATE: ${formatDate(t.event_date).toUpperCase()}`, 46, bannerH + 112);
     fittedText(ctx, `VENUE: ${(t.venue || 'TBA').toUpperCase()}`, 46, bannerH + 146, 515, 24, 16);
 
-    const bc = getBarcodeCanvas(t.ticket_id);
-    if (bc) {
+    const qr = await getQrImage(t.ticket_id);
+    const qrBoxX = 46, qrBoxY = bannerH + 160, qrBoxSize = 136;
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(qrBoxX, qrBoxY, qrBoxSize, qrBoxSize);
+    ctx.strokeStyle = '#181818';
+    ctx.lineWidth = 2.5;
+    ctx.strokeRect(qrBoxX, qrBoxY, qrBoxSize, qrBoxSize);
+    if (qr) {
       ctx.save();
       ctx.imageSmoothingEnabled = false;
-      ctx.drawImage(bc, 34, bannerH + 158, bc.width, bc.height);
+      ctx.drawImage(qr, qrBoxX + 10, qrBoxY + 10, qrBoxSize - 20, qrBoxSize - 20);
       ctx.restore();
-    } else {
-      for (let x = 46, i = 0; x < 520; x += (i % 3 === 0 ? 7 : 4), i++) {
-        ctx.fillStyle = '#111111';
-        ctx.fillRect(x, bannerH + 165, i % 2 === 0 ? 3 : 1.5, 92);
-      }
     }
     ctx.fillStyle = '#111111';
-    ctx.font = '800 29px Manrope, Arial, sans-serif';
-    ctx.fillText(t.ticket_id, 46, bannerH + 295);
+    fittedText(ctx, t.ticket_id, qrBoxX + qrBoxSize + 22, qrBoxY + 80, 340, 29, 18);
 
     // Right column: Nigerian flag + Holder + Boxed Ticket Type table
     const rightX = 575, rightW = stubX - rightX - 38;
@@ -666,14 +667,19 @@
     e.preventDefault();
     await lookupAndVerify($('verifyInput').value);
   }
+  function vibrateSuccess() {
+    try {
+      if (typeof navigator.vibrate === 'function') navigator.vibrate([120, 50, 160]);
+    } catch { /* ignore if unsupported */ }
+  }
   async function getDetector() {
     if (state.detector !== undefined && state.detector !== null) return state.detector;
     if ('BarcodeDetector' in window) {
       try {
         const formats = await window.BarcodeDetector.getSupportedFormats();
-        const wanted = ['code_128', 'code_39', 'ean_13', 'qr_code', 'pdf417', 'aztec', 'data_matrix'].filter((f) => formats.includes(f));
+        const wanted = ['qr_code', 'code_128', 'code_39', 'ean_13', 'pdf417', 'aztec', 'data_matrix'].filter((f) => formats.includes(f));
         if (wanted.length) state.detector = new window.BarcodeDetector({ formats: wanted });
-      } catch { /* fall back to Quagga / ZXing */ }
+      } catch { /* fall back to jsQR / ZXing */ }
     }
     return state.detector;
   }
@@ -685,15 +691,24 @@
     if (window.ZXing.DecodeHintType && window.ZXing.BarcodeFormat) {
       hints.set(window.ZXing.DecodeHintType.TRY_HARDER, true);
       hints.set(window.ZXing.DecodeHintType.POSSIBLE_FORMATS, [
+        window.ZXing.BarcodeFormat.QR_CODE,
         window.ZXing.BarcodeFormat.CODE_128,
-        window.ZXing.BarcodeFormat.CODE_39,
-        window.ZXing.BarcodeFormat.QR_CODE
+        window.ZXing.BarcodeFormat.CODE_39
       ]);
     }
     reader.setHints(hints);
     state.zxingHints = hints;
     state.zxingReader = reader;
     return reader;
+  }
+  function tryJsQrCanvas(canvas) {
+    if (!window.jsQR) return null;
+    try {
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const code = window.jsQR(img.data, canvas.width, canvas.height, { inversionAttempts: 'attemptBoth' });
+      return code?.data || null;
+    } catch { return null; }
   }
   function tryZxingCanvas(canvas) {
     const reader = getZxingReader();
@@ -708,25 +723,8 @@
     }
     return null;
   }
-  function tryQuaggaCanvas(canvas, locate = true) {
-    if (!window.Quagga?.decodeSingle) return Promise.resolve(null);
-    return new Promise((resolve) => {
-      try {
-        window.Quagga.decodeSingle({
-          src: canvas.toDataURL('image/png'),
-          numOfWorkers: 0,
-          locate,
-          inputStream: { size: Math.min(1280, Math.max(640, canvas.width)) },
-          decoder: { readers: ['code_128_reader', 'code_39_reader'] }
-        }, (result) => {
-          resolve(result?.codeResult?.code || null);
-        });
-      } catch { resolve(null); }
-    });
-  }
-  function renderCropToCanvas(source, sx, sy, sw, sh, angle = 0) {
+  function renderCropToCanvas(source, sx, sy, sw, sh, maxDim = 960) {
     if (!state.scanCanvas) state.scanCanvas = document.createElement('canvas');
-    const maxDim = 1280;
     const scale = Math.min(1.5, maxDim / Math.max(sw, sh, 1));
     const w = Math.max(40, Math.round(sw * scale));
     const h = Math.max(40, Math.round(sh * scale));
@@ -735,14 +733,7 @@
     const ctx = state.scanCanvas.getContext('2d', { willReadFrequently: true });
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, w, h);
-    ctx.save();
-    if (angle) {
-      ctx.translate(w / 2, h / 2);
-      ctx.rotate(angle);
-      ctx.translate(-w / 2, -h / 2);
-    }
     ctx.drawImage(source, sx, sy, sw, sh, 0, 0, w, h);
-    ctx.restore();
     return state.scanCanvas;
   }
   async function decodeSource(source, width, height, isStaticImage = false) {
@@ -755,50 +746,31 @@
       } catch { /* fall through */ }
     }
 
-    // Crop regions: 1) center rectangular barcode window, 2) ticket bottom-left barcode area, 3) full frame
+    const minDim = Math.min(width, height);
+    const sqSize = Math.round(minDim * 0.72);
+    const sqX = Math.round((width - sqSize) / 2);
+    const sqY = Math.round((height - sqSize) / 2);
+
     const regions = isStaticImage
       ? [
-          [0, Math.round(height * 0.48), Math.round(width * 0.56), Math.round(height * 0.46), 0],
-          [0, 0, width, height, 0],
-          [Math.round(width * 0.06), Math.round(height * 0.2), Math.round(width * 0.88), Math.round(height * 0.6), 0],
-          [0, 0, width, height, 0.075],
-          [0, 0, width, height, -0.075]
+          [0, Math.round(height * 0.45), Math.round(width * 0.45), Math.round(height * 0.55), 900],
+          [0, 0, width, height, 1100],
+          [0, 0, width, height, 640],
+          [sqX, sqY, sqSize, sqSize, 800]
         ]
       : [
-          [Math.round(width * 0.06), Math.round(height * 0.22), Math.round(width * 0.88), Math.round(height * 0.56), 0],
-          [0, 0, width, height, 0]
+          [sqX, sqY, sqSize, sqSize, 640],
+          [0, 0, width, height, 720]
         ];
 
-    for (const [sx, sy, sw, sh, angle] of regions) {
-      const c = renderCropToCanvas(source, sx, sy, sw, sh, angle);
-      if (detector && angle !== 0) {
-        try {
-          const hits = await detector.detect(c);
-          if (hits?.length && hits[0].rawValue) return hits[0].rawValue;
-        } catch { /* continue */ }
-      }
+    for (const [sx, sy, sw, sh, maxDim] of regions) {
+      const c = renderCropToCanvas(source, sx, sy, sw, sh, maxDim);
+      const qrHit = tryJsQrCanvas(c);
+      if (qrHit) return qrHit;
       const zxingHit = tryZxingCanvas(c);
       if (zxingHit) return zxingHit;
     }
-
-    // Quagga2 1D Code-128 decoder pass (handles arbitrary camera/image 1D barcodes)
-    const primaryCrop = isStaticImage
-      ? renderCropToCanvas(source, 0, 0, width, height, 0)
-      : renderCropToCanvas(source, Math.round(width * 0.06), Math.round(height * 0.22), Math.round(width * 0.88), Math.round(height * 0.56), 0);
-    const quaggaHit = (await tryQuaggaCanvas(primaryCrop, true)) || (await tryQuaggaCanvas(primaryCrop, false));
-    if (quaggaHit) return quaggaHit;
-    if (isStaticImage) {
-      const subCrop = renderCropToCanvas(source, 0, Math.round(height * 0.48), Math.round(width * 0.56), Math.round(height * 0.46), 0);
-      const subHit = (await tryQuaggaCanvas(subCrop, false)) || (await tryQuaggaCanvas(subCrop, true));
-      if (subHit) return subHit;
-    }
-
-    if (!window.jsQR) return null;
-    const fullCanvas = renderCropToCanvas(source, 0, 0, width, height, 0);
-    const ctx = fullCanvas.getContext('2d', { willReadFrequently: true });
-    const img = ctx.getImageData(0, 0, fullCanvas.width, fullCanvas.height);
-    const code = window.jsQR(img.data, fullCanvas.width, fullCanvas.height, { inversionAttempts: 'attemptBoth' });
-    return code?.data || null;
+    return null;
   }
   function stopScanner() {
     if (state.scanRaf) { cancelAnimationFrame(state.scanRaf); state.scanRaf = 0; }
@@ -828,18 +800,18 @@
       $('scannerBox').classList.remove('hidden');
       $('scanToggleButton').innerHTML = '<i data-lucide="camera-off"></i> Stop camera';
       refreshIcons($('scanToggleButton'));
-      $('scannerStatus').textContent = 'Align the ticket barcode inside the rectangle…';
+      $('scannerStatus').textContent = 'Align the ticket QR code inside the square…';
       const devices = await navigator.mediaDevices.enumerateDevices().catch(() => []);
       const cams = devices.filter((d) => d.kind === 'videoinput');
       $('switchCameraButton').classList.toggle('hidden', cams.length < 2);
       const tick = async () => {
         if (!state.scanStream) return;
         if (video.readyState >= 2 && video.videoWidth > 0) {
-          const raw = await decodeSource(video, video.videoWidth, video.videoHeight);
+          const raw = await decodeSource(video, video.videoWidth, video.videoHeight, false);
           if (raw) {
             const id = extractTicketId(raw);
             if (id) {
-              if (navigator.vibrate) navigator.vibrate(80);
+              vibrateSuccess();
               stopScanner();
               toast(`Scanned ${id}`);
               await lookupAndVerify(id);
@@ -878,8 +850,9 @@
       });
       URL.revokeObjectURL(url);
       const raw = await decodeSource(img, img.naturalWidth || img.width, img.naturalHeight || img.height, true);
-      if (!raw) return toast('No ticket barcode was detected in that image.', true);
+      if (!raw) return toast('No ticket QR code was detected in that image.', true);
       const id = extractTicketId(raw);
+      vibrateSuccess();
       toast(`Scanned ${id}`);
       await lookupAndVerify(id);
     } catch (err) { toast(err.message || 'Could not scan image.', true); }
